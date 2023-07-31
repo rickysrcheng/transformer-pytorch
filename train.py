@@ -8,19 +8,21 @@ from torch.utils.data import DataLoader
 from torch.nn.utils.rnn import pad_sequence
 import wandb
 from timeit import default_timer as timer
+from mask import generate_padding_mask, generate_target_mask
+from pathlib import Path
 
 wandb.init(
     project="Transformer",
 
     config={
-        'epochs' : 1000,
-        'batch_size' : 128,
+        'epochs' : 2000,
+        'batch_size' : 256,
         'd_model' : 512,
         'd_hidden' : 2048,
         'n_heads' : 8,
         'n_layers' : 6,
         'dropout' : 0.1,
-        'warmup_steps' : 4000
+        'warmup_steps' : 8000
     }
 )
 
@@ -50,16 +52,6 @@ def collate_fn(batch):
     en_batch = pad_sequence(en_batch, padding_value=PAD_IDX, batch_first=True)
     return de_batch, en_batch
 
-def generate_padding_mask(tensor):
-    return (tensor != PAD_IDX).unsqueeze(-2)
-
-def generate_target_mask(tensor):
-    padding_mask = generate_padding_mask(tensor)
-    sz = tensor.size(-1)
-    future_mask = (torch.triu(torch.ones((sz, sz)) == 1)).transpose(0, 1).unsqueeze(0)
-    #mask = mask.float().masked_fill(mask == 0, float('-inf')).masked_fill(mask == 1, float(0.0))
-    return padding_mask & future_mask.type_as(padding_mask.data)
-
 
 n_src_vocab = len(vocab[SRC_LANGUAGE])
 n_tgt_vocab = len(vocab[TGT_LANGUAGE])
@@ -77,7 +69,7 @@ model.apply(init_weights)
 
 model.to(DEVICE)
 loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=0.1)
-optimizer = torch.optim.Adam(model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9)
+optimizer = torch.optim.Adam(model.parameters(), lr=2, betas=(0.9, 0.98), eps=1e-9)
 
 def rate(step, d_model, warmup_steps):
     if step == 0:
@@ -87,24 +79,39 @@ def rate(step, d_model, warmup_steps):
 lrate = lambda step : rate(step, wandb.config.d_model, wandb.config.warmup_steps)
 
 lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lrate)
+print(f"Starting training: {wandb.run.name}")
+Path(f"./model/{wandb.run.name}/").mkdir(parents=True, exist_ok=True)
+
+train_iter = Multi30k(root="../data", split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+train_dataloader = DataLoader(train_iter, wandb.config.batch_size, collate_fn=collate_fn, shuffle=True)
+
+val_iter = Multi30k(root="../data", split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+val_dataloader = DataLoader(val_iter, wandb.config.batch_size, collate_fn=collate_fn)
 
 for e in range(wandb.config.epochs):
     model.train()
     losses = 0
-    train_iter = Multi30k(root="../data", split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
-    train_dataloader = DataLoader(train_iter, wandb.config.batch_size, collate_fn=collate_fn, shuffle=True)
+    
     epoch_time = timer()
     for src, tgt in train_dataloader:
-        src_mask = generate_padding_mask(src).to(DEVICE)
-        tgt_mask = generate_target_mask(tgt).to(DEVICE)
-        src = src.to(DEVICE).long()
-        tgt = tgt.to(DEVICE).long()
-
-        logits = model(src, tgt, src_mask, tgt_mask)
-        
         optimizer.zero_grad()
+        
+        # select all except <eos>
+        # since the transformer predicts the next token
+        # based on the tokens we see right now
+        tgt_input = tgt[:, :-1]
+        src_mask = generate_padding_mask(src).to(DEVICE)
+        tgt_mask = generate_target_mask(tgt_input).to(DEVICE)
+        src = src.to(DEVICE).long()
+        tgt_input = tgt_input.to(DEVICE).long()
 
-        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt.reshape(-1))
+        logits = model(src, tgt_input, src_mask, tgt_mask)
+
+        # shift target left for loss compute
+        # since we are trying to predict the next token
+        tgt_output = tgt[:, 1:].to(DEVICE).long()
+
+        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
         loss.backward()
 
         optimizer.step()
@@ -115,21 +122,21 @@ for e in range(wandb.config.epochs):
     
     model.eval()
 
-    val_iter = Multi30k(root="../data", split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
-    val_dataloader = DataLoader(val_iter, wandb.config.batch_size, collate_fn=collate_fn)
     val_losses = 0
-    
-    for src, tgt in val_dataloader:
-        src_mask = generate_padding_mask(src).to(DEVICE)
-        tgt_mask = generate_target_mask(tgt).to(DEVICE)
-        src = src.to(DEVICE).long()
-        tgt = tgt.to(DEVICE).long()
+    with torch.no_grad():
+        for src, tgt in val_dataloader:
+            tgt_input = tgt[:, :-1]
+            src_mask = generate_padding_mask(src).to(DEVICE)
+            tgt_mask = generate_target_mask(tgt_input).to(DEVICE)
+            src = src.to(DEVICE).long()
+            tgt_input = tgt_input.to(DEVICE).long()
 
-        logits = model(src, tgt, src_mask, tgt_mask)
+            logits = model(src, tgt_input, src_mask, tgt_mask)
 
-        loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt.reshape(-1))
+            tgt_output = tgt[:, 1:].to(DEVICE).long()
+            loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
 
-        val_losses += loss.item()
+            val_losses += loss.item()
 
     train_loss = losses/len(list(train_dataloader))
     val_loss = val_losses/len(list(val_dataloader))
@@ -138,5 +145,5 @@ for e in range(wandb.config.epochs):
     print(f"Epoch: {e}, train loss = {train_loss}, val loss = {val_loss}, time: {end_time - epoch_time}")
 
     if (e+1) % 10 == 0:
-        torch.save(model.state_dict(), f"./model/model-{e+1}.pt")
+        torch.save(model.state_dict(), f"./model/{wandb.run.name}/model-{e+1}.pt")
 

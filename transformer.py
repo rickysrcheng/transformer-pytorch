@@ -37,7 +37,7 @@ class Transformer(nn.Module):
     
     def generate(self, x):
         assert x.size(-1) == self.d_model
-        return self.lmhead(x)
+        return F.softmax(self.lmhead(x), dim=-1)
 
 
 def init_weights(m):
