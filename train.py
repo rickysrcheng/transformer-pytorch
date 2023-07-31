@@ -16,13 +16,13 @@ wandb.init(
 
     config={
         'epochs' : 2000,
-        'batch_size' : 256,
+        'batch_size' : 128,
         'd_model' : 512,
         'd_hidden' : 2048,
         'n_heads' : 8,
         'n_layers' : 6,
         'dropout' : 0.1,
-        'warmup_steps' : 8000
+        'warmup_steps' : 4000
     }
 )
 
@@ -125,6 +125,7 @@ for e in range(wandb.config.epochs):
     val_losses = 0
     with torch.no_grad():
         for src, tgt in val_dataloader:
+            # batch x seq_len
             tgt_input = tgt[:, :-1]
             src_mask = generate_padding_mask(src).to(DEVICE)
             tgt_mask = generate_target_mask(tgt_input).to(DEVICE)
