@@ -5,14 +5,12 @@ import numpy as np
 
 
 class MultiheadAttention(nn.Module):
-    def __init__(self, num_heads=8, d_model=512, mask=False, *args, **kwargs) -> None:
+    def __init__(self, num_heads=8, d_model=512, *args, **kwargs) -> None:
         super(MultiheadAttention, self).__init__(*args, **kwargs)
         assert d_model % num_heads == 0
         self.d_model = d_model
         self.h = num_heads
         self.d_k = self.d_model//self.h
-
-        self.mask = mask
 
         # used h separate Linear layers before realizing I can use a giant one
         # and then resize the output

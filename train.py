@@ -10,13 +10,14 @@ import wandb
 from timeit import default_timer as timer
 from mask import generate_padding_mask, generate_target_mask
 from pathlib import Path
+from torchsummary import summary
 
 wandb.init(
     project="Transformer",
 
     config={
         'epochs' : 2000,
-        'batch_size' : 128,
+        'batch_size' : 256,
         'd_model' : 512,
         'd_hidden' : 2048,
         'n_heads' : 8,
@@ -55,21 +56,39 @@ def collate_fn(batch):
 
 n_src_vocab = len(vocab[SRC_LANGUAGE])
 n_tgt_vocab = len(vocab[TGT_LANGUAGE])
+train_iter = Multi30k(root="../data", split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+train_dataloader = DataLoader(train_iter, wandb.config.batch_size, collate_fn=collate_fn)
+
+val_iter = Multi30k(root="../data", split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
+val_dataloader = DataLoader(val_iter, wandb.config.batch_size, collate_fn=collate_fn)
 
 model = Transformer(n_src_vocab, n_tgt_vocab, 
                     wandb.config.d_model, wandb.config.n_heads, 
                     wandb.config.d_hidden, wandb.config.n_layers, 
                     wandb.config.dropout)
+# for src, tgt in train_dataloader:
+#     print(src[0])
+#     print(vocab[SRC_LANGUAGE].lookup_tokens(list(src[0])))
+#     print()
 
-def init_weights(m):
-    if isinstance(m, nn.Linear):
-        torch.nn.init.xavier_uniform_(m.weight)
 
-model.apply(init_weights)
+# exit()
 
+# def init_weights(m):
+#     if isinstance(m, nn.Linear):
+#         torch.nn.init.xavier_uniform_(m.weight)
+
+# model.apply(init_weights)
+
+for p in model.parameters():
+    if p.dim() > 1:
+        torch.nn.init.xavier_uniform_(p)
+# print(model)
+
+# input()
 model.to(DEVICE)
 loss_fn = nn.CrossEntropyLoss(ignore_index=PAD_IDX, label_smoothing=0.1)
-optimizer = torch.optim.Adam(model.parameters(), lr=2, betas=(0.9, 0.98), eps=1e-9)
+optimizer = torch.optim.Adam(model.parameters(), lr=1, betas=(0.9, 0.98), eps=1e-9)
 
 def rate(step, d_model, warmup_steps):
     if step == 0:
@@ -79,46 +98,58 @@ def rate(step, d_model, warmup_steps):
 lrate = lambda step : rate(step, wandb.config.d_model, wandb.config.warmup_steps)
 
 lr_scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lrate)
+lr_scheduler.step()
 print(f"Starting training: {wandb.run.name}")
 Path(f"./model/{wandb.run.name}/").mkdir(parents=True, exist_ok=True)
 
-train_iter = Multi30k(root="../data", split='train', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
-train_dataloader = DataLoader(train_iter, wandb.config.batch_size, collate_fn=collate_fn, shuffle=True)
 
-val_iter = Multi30k(root="../data", split='valid', language_pair=(SRC_LANGUAGE, TGT_LANGUAGE))
-val_dataloader = DataLoader(val_iter, wandb.config.batch_size, collate_fn=collate_fn)
 
 for e in range(wandb.config.epochs):
     model.train()
     losses = 0
-    
+    i = 0
     epoch_time = timer()
-    for src, tgt in train_dataloader:
+    for idx, (src, tgt) in enumerate(train_dataloader):
         optimizer.zero_grad()
         
-        # select all except <eos>
+        # select all except last token
         # since the transformer predicts the next token
         # based on the tokens we see right now
         tgt_input = tgt[:, :-1]
         src_mask = generate_padding_mask(src).to(DEVICE)
+
         tgt_mask = generate_target_mask(tgt_input).to(DEVICE)
+        
         src = src.to(DEVICE).long()
         tgt_input = tgt_input.to(DEVICE).long()
-
         logits = model(src, tgt_input, src_mask, tgt_mask)
 
         # shift target left for loss compute
         # since we are trying to predict the next token
         tgt_output = tgt[:, 1:].to(DEVICE).long()
 
+        # reshape to the number of tokens in this batch
+        # logit shape = batch x seq_len x num_tgt_tokens => (batch * seq_len) x num_tgt_tokens
+        # tgt_output shape = (batch * seq_len) x 1
         loss = loss_fn(logits.reshape(-1, logits.shape[-1]), tgt_output.reshape(-1))
         loss.backward()
 
         optimizer.step()
         lr_scheduler.step()
         lr = lr_scheduler.get_last_lr()[0]
-        wandb.log({"learning_rate": float(lr)})
+        wandb.log({"learning_rate": float(lr)})   
         losses += loss.item()
+        # if i > 1:
+        #     break
+        # i += 1
+        #print(src)
+        #print(vocab[SRC_LANGUAGE].lookup_tokens(list(src[0])))
+        if idx == 0:
+            prob, word_tensor = torch.max(nn.functional.softmax(logits), dim=2)
+            print(vocab[TGT_LANGUAGE].lookup_tokens(list(tgt_output[0])))
+            print(vocab[TGT_LANGUAGE].lookup_tokens(list(word_tensor[0])))
+    #print(losses)
+ 
     
     model.eval()
 
@@ -143,8 +174,9 @@ for e in range(wandb.config.epochs):
     val_loss = val_losses/len(list(val_dataloader))
     wandb.log({"epoch": e, "train_loss": train_loss, "val_loss": val_loss})
     end_time = timer()
-    print(f"Epoch: {e}, train loss = {train_loss}, val loss = {val_loss}, time: {end_time - epoch_time}")
+    print(f"Epoch: {e}, train loss = {train_loss}, val loss = {val_loss}, time: {end_time - epoch_time}, LR: {float(lr):.2E}, len(train_dataloader): {len(list(train_dataloader))}")
 
-    if (e+1) % 10 == 0:
+    if (e+1) % 100 == 0:
+        #print(f"Epoch: {e}, train loss = {train_loss}, val loss = {val_loss}, time: {end_time - epoch_time}")
         torch.save(model.state_dict(), f"./model/{wandb.run.name}/model-{e+1}.pt")
 

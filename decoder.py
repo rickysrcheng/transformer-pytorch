@@ -21,14 +21,14 @@ class DecoderLayer(nn.Module):
         self.layer_norm2 = nn.LayerNorm(d_model, eps=1e-06)
 
     def forward(self, x, x_mask, enc, enc_mask):
-        residual0 = x
+        residual0 = x.clone()
 
         x, attn = self.masked_attention(x, x, x, x_mask)
         x = self.dropout0(x)
         x += residual0
         x = self.layer_norm0(x)
         
-        residual1 = x
+        residual1 = x.clone()
 
         # Paper's input order is V, K, Q
         # had me wondering what I did wrong cz I assumed Q, K, V... smh
@@ -37,7 +37,7 @@ class DecoderLayer(nn.Module):
         x += residual1
         x = self.layer_norm1(x)
 
-        residual2 = x
+        residual2 = x.clone()
 
         x = self.pwff(x)
         x = self.dropout2(x)

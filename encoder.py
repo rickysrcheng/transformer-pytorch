@@ -14,14 +14,14 @@ class EncoderLayer(nn.Module):
         self.layer_norm1 = nn.LayerNorm(d_model, eps=1e-06)
 
     def forward(self, x, mask):
-        residual0 = x
+        residual0 = x.clone()
 
         x, attn = self.attention(x, x, x, mask)
         x = self.dropout0(x)
         x += residual0
         x = self.layer_norm0(x)
         
-        residual1 = x
+        residual1 = x.clone()
         
         x = self.pwff(x)
         x = self.dropout1(x)

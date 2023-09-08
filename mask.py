@@ -6,6 +6,7 @@ def generate_padding_mask(tensor):
     return (tensor != PAD_IDX).unsqueeze(-2)
 
 def generate_target_mask(tensor):
+    # returns a 1 x sz x sz mask
     padding_mask = generate_padding_mask(tensor)
     sz = tensor.size(-1)
     future_mask = (torch.triu(torch.ones((sz, sz)) == 1)).transpose(0, 1).unsqueeze(0)
