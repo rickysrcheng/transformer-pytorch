@@ -27,7 +27,7 @@ class MultiheadAttention(nn.Module):
         # how do i mask????
         # from http://nlp.seas.harvard.edu/annotated-transformer/
         if mask is not None:
-            score = score.masked_fill(mask == 0, -1e-15)
+            score = score.masked_fill(mask == 0, -1e15)
         
         
         attention_score = F.softmax(score, dim=-1)
