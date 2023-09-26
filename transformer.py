@@ -12,7 +12,7 @@ from lmhead import LMHead
 class Transformer(nn.Module):
     def __init__(self, n_src_vocab, n_tgt_vocab, 
                  d_model = 512, num_heads=8, d_hidden=2048, n_layers=6,
-                 dropout=0.1, *args, **kwargs) -> None:
+                 dropout=0.1, rotary=False, *args, **kwargs) -> None:
         super(Transformer, self).__init__(*args, **kwargs)
 
         self.d_model = d_model
@@ -25,9 +25,10 @@ class Transformer(nn.Module):
                                dropout=dropout)
         
         self.lmhead = LMHead(d_model, n_tgt_vocab)
+        self.rotary = rotary
 
     def forward(self, src, tgt, src_mask, tgt_mask):
-        return self.lmhead(self.decoder(tgt, tgt_mask, self.encoder(src, src_mask), src_mask))
+        return self.lmhead(self.decoder(tgt, tgt_mask, self.encoder(src, src_mask, rotary=self.rotary), src_mask, rotary=self.rotary))
     
     def encode(self, src, src_mask):
         return self.encoder(src, src_mask)

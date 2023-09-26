@@ -13,10 +13,10 @@ from pathlib import Path
 from torchsummary import summary
 
 wandb.init(
-    project="Transformer",
+    project="RoFormer",
 
     config={
-        'epochs' : 2000,
+        'epochs' : 500,
         'batch_size' : 256,
         'd_model' : 512,
         'd_hidden' : 2048,

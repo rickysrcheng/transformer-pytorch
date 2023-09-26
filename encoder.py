@@ -4,9 +4,10 @@ from sublayer import MultiheadAttention, PositionwiseFeedForward
 from inputprocessing import Embedding, PositionalEncoding
 
 class EncoderLayer(nn.Module):
-    def __init__(self, h=8, d_model=512, d_hidden=2048, dropout=0.1, *args, **kwargs) -> None:
+    def __init__(self, h=8, d_model=512, d_hidden=2048, dropout=0.1, rotary=False, *args, **kwargs) -> None:
         super(EncoderLayer, self).__init__(*args, **kwargs)
-        self.attention = MultiheadAttention(num_heads=h, d_model=d_model)
+        self.rotary = rotary
+        self.attention = MultiheadAttention(num_heads=h, d_model=d_model, rotary=self.rotary)
         self.dropout0 = nn.Dropout(dropout)
         self.layer_norm0 = nn.LayerNorm(d_model, eps=1e-06)
         self.pwff = PositionwiseFeedForward(d_model, d_hidden)
@@ -31,19 +32,24 @@ class EncoderLayer(nn.Module):
         return x, attn
 
 class Encoder(nn.Module):
-    def __init__(self, vocab_size, n_layers=6, d_model=512, num_heads=8, d_hidden=2048, dropout=0.1, *args, **kwargs) -> None:
+    def __init__(self, vocab_size, n_layers=6, d_model=512, num_heads=8, d_hidden=2048, dropout=0.1, rotary=False, *args, **kwargs) -> None:
         super(Encoder, self).__init__(*args, **kwargs)
         
         self.input_layer = nn.Sequential(
             Embedding(vocab_size, d_model),
             PositionalEncoding(d_model, dropout=dropout)
         )
+        self.embedding = Embedding(vocab_size, d_model)
+        self.encoding = PositionalEncoding(d_model, dropout)
+        self.rotary = rotary
         self.encoder_layers = nn.ModuleList(
-            [EncoderLayer(num_heads, d_model, d_hidden, dropout) for i in range(n_layers)]
+            [EncoderLayer(num_heads, d_model, d_hidden, dropout, rotary=self.rotary) for i in range(n_layers)]
         )
 
     def forward(self, x, mask):
-        x = self.input_layer(x)
+        x = self.embedding(x)
+        if not self.rotary:
+            x = self.encoding(x)
 
         for layer in self.encoder_layers:
             x, _ = layer(x, mask)

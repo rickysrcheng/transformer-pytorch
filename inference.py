@@ -43,7 +43,7 @@ n_layers = 6
 dropout = 0.1
 
 
-PATH = "./model/devout-oath-81/model-300.pt"
+PATH = "./model/devout-oath-81/model-600.pt"
 
 n_src_vocab = len(vocab[SRC_LANGUAGE])
 n_tgt_vocab = len(vocab[TGT_LANGUAGE])

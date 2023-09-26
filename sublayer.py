@@ -5,9 +5,12 @@ import numpy as np
 
 
 class MultiheadAttention(nn.Module):
-    def __init__(self, num_heads=8, d_model=512, *args, **kwargs) -> None:
+    def __init__(self, num_heads=8, d_model=512, rotary=False, *args, **kwargs) -> None:
         super(MultiheadAttention, self).__init__(*args, **kwargs)
         assert d_model % num_heads == 0
+
+        self.rotary = rotary
+
         self.d_model = d_model
         self.h = num_heads
         self.d_k = self.d_model//self.h
